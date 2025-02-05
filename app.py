@@ -95,30 +95,28 @@ st.title('🦜🔗 Advanced Ask the Doc App v3 - Gemini')
 st.write("## Instructions")
 st.write(
     "Upload a document (txt, pdf, docx, or doc) and ask a question about its content. "
-    "This version uses **Google Gemini Pro** for question answering."
-    " It includes advanced error handling, feedback on document processing, and displays the source context "
-    "used to generate the answer."
+    "This version uses **Google Gemini Pro** for question answering. "
+    "It includes advanced error handling, feedback on document processing, and displays the source context used to generate the answer."
 )
-
-# File upload - Keep file upload OUTSIDE the form for now
-uploaded_file = st.file_uploader('Upload a document', type=['txt', 'pdf', 'docx', 'doc'])
 
 result = None
 
-with st.form('query_form', clear_on_submit=True): # Query and API Key are now IN the form
-    query_text = st.text_input('Enter your question:', placeholder='Ask something about the document.', disabled=(uploaded_file is None)) # Moved inside form
+with st.form('query_form', clear_on_submit=True):
+    uploaded_file = st.file_uploader('Upload a document', type=['txt', 'pdf', 'docx', 'doc'])
+    query_text = st.text_input('Enter your question:', placeholder='Ask something about the document.')
     google_api_key = st.text_input(
         'Google API Key',
         type='password',
-        help="Enter your Google API key (Get it from Google AI Studio).",
-        disabled=False
+        help="Enter your Google API key (Get it from Google AI Studio)."
     )
-    st.write(f"uploaded_file: {uploaded_file is not None}") # Debugging - Check if file is uploaded
-    st.write(f"query_text: {bool(query_text)}")       # Debugging - Check if query is entered
-    st.write(f"google_api_key: {bool(google_api_key)}")   # Debugging - Check if API key is entered
-    st.write(f"Combined condition: {(uploaded_file and query_text and google_api_key)}") # Debugging - Combined condition (including uploaded_file now, even though file upload is outside form)
-    st.write(f"disabled: {not google_api_key}") # Debugging - Simplified disabled condition - ONLY depends on API key now for testing
-    submitted = st.form_submit_button("Submit Query", disabled=(not google_api_key)) # Simplified disabled condition - ONLY depends on API key for testing
+    
+    # You can add debugging information here, if needed.
+    st.write(f"File uploaded: {uploaded_file is not None}")
+    st.write(f"Query typed: {bool(query_text)}")
+    st.write(f"Google API key provided: {bool(google_api_key)}")
+    
+    submitted = st.form_submit_button("Submit Query", disabled=not (uploaded_file and query_text and google_api_key))
+    
     if submitted:
         with st.spinner('Processing document and generating answer...'):
             processed_docs = load_and_preprocess_document(uploaded_file)
@@ -127,17 +125,15 @@ with st.form('query_form', clear_on_submit=True): # Query and API Key are now IN
 
 if result:
     st.write("## Answer")
-    # Display answer
     answer = result.get("result", "No answer returned")
     st.info(answer)
 
-    # Display source context
     source_docs = result.get("source_documents", [])
     if source_docs:
         st.write("### Source Document Chunks Used:")
         for i, doc in enumerate(source_docs, start=1):
             st.write(f"**Chunk {i}:**")
-            st.markdown(doc.page_content)  # Assuming each document has a 'page_content' attribute
+            st.markdown(doc.page_content)
 
 # --- Evaluation Section (Basic Evaluation Integration) ---
 with st.expander("Show Evaluation Metrics (Basic)"):
