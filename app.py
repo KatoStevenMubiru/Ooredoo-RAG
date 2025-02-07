@@ -1,32 +1,40 @@
 import streamlit as st
 import tempfile
 import os
+from chromadb.config import Settings
+from langchain_community.vectorstores import Chroma
 
-from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain.document_loaders import UnstructuredFileLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.llms import OpenAI
 from langchain.chains import RetrievalQA
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain_community.retrievers import *
+from langchain.embeddings import CohereEmbeddings
+from langchain.llms import Cohere
+import time
 
-# --- Function Definitions ---
+# Optional: For OCR image handling, you may import pytesseract and pdf2image if needed
+# import pytesseract
+# from pdf2image import convert_from_path
 
 def load_and_preprocess_document(uploaded_file):
     """
-    Load and preprocess the uploaded file using UnstructuredFileLoader and
+    Load and preprocess the uploaded file using UnstructuredFileLoader and 
     RecursiveCharacterTextSplitter for better chunking.
+    Added error handling and user feedback.
     """
     try:
         if uploaded_file is not None:
-            # Save the uploaded file to a temporary file
+            # Save the uploaded file to a temporary file to allow file-based loading.
             suffix = os.path.splitext(uploaded_file.name)[1]
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_file_path = tmp_file.name
 
-            # For PDFs, additional table extraction can be added here.
-            # For now, we use UnstructuredFileLoader as a baseline.
+            # Use UnstructuredFileLoader which infers file type from the extension.
             loader = UnstructuredFileLoader(tmp_file_path)
             documents = loader.load()
 
@@ -36,111 +44,150 @@ def load_and_preprocess_document(uploaded_file):
             # Chunk the document with a recursive text splitter.
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             processed_docs = text_splitter.split_documents(documents)
-
+            
+            # Provide user feedback about successful processing
             st.success(f"Document processed successfully. {len(processed_docs)} text chunks created.")
             return processed_docs
     except Exception as e:
         st.error(f"Error processing the document: {e}")
         return None
 
-def create_hybrid_retriever(processed_docs, google_api_key):
+def create_hybrid_retriever(processed_docs, cohere_api_key):
     """
     Create a hybrid retriever that uses both vector search (Chroma) and BM25 retrieval.
     """
     try:
-        embeddings = GoogleGenerativeAiEmbeddings(model="models/embedding-001", google_api_key=google_api_key)
-        vectorstore = Chroma.from_documents(processed_docs, embeddings)
+        # Create a persistent directory for ChromaDB
+        persist_directory = os.path.join(os.getcwd(), "chroma_db")
+        os.makedirs(persist_directory, exist_ok=True)
+
+        # Updated embeddings initialization with additional required parameters
+        embeddings = CohereEmbeddings(
+            cohere_api_key=cohere_api_key,
+            model="embed-english-v3.0",
+            client=None,
+            user_agent="langchain"
+        )
+        
+        # Initialize Chroma with persistent directory
+        vectorstore = Chroma.from_documents(
+            documents=processed_docs,
+            embedding=embeddings,
+            persist_directory=persist_directory,
+            collection_name="doc_collection"
+        )
+        
         vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
         bm25_retriever = BM25Retriever.from_documents(processed_docs)
         bm25_retriever.k = 3
+        
         ensemble_retriever = EnsembleRetriever(
             retrievers=[vector_retriever, bm25_retriever],
             weights=[0.7, 0.3]
         )
         return ensemble_retriever
     except Exception as e:
-        st.error(f"Error creating hybrid retriever: {e}")
+        import traceback
+        st.error(f"Error creating hybrid retriever: {str(e)}\n\nTraceback:\n{traceback.format_exc()}")
         return None
 
-def generate_response(processed_docs, google_api_key, query_text):
+def generate_response(processed_docs, cohere_api_key, query_text):
     """
     Generate the answer using RetrievalQA with the hybrid retriever.
-    Modified to return both the answer and the source documents used.
+    Modified to stream the response.
     """
     try:
-        retriever = create_hybrid_retriever(processed_docs, google_api_key)
+        retriever = create_hybrid_retriever(processed_docs, cohere_api_key)
         if retriever is None:
             return None
-
-        llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=google_api_key)
+            
+        # Updated Cohere LLM initialization without streaming parameter
+        cohere_llm = Cohere(
+            cohere_api_key=cohere_api_key,
+            temperature=0.7,
+            max_tokens=512
+        )
+        
         qa = RetrievalQA.from_chain_type(
-            llm=llm,
+            llm=cohere_llm,
             chain_type="stuff",
             retriever=retriever,
             return_source_documents=True
         )
+        
+        # Create a placeholder for displaying the response
+        response_placeholder = st.empty()
+        
+        # Get the response
         result = qa({"query": query_text})
-        return result  # result contains "result" and "source_documents"
+        
+        # Display the response with a typing effect
+        response_text = result["result"]
+        displayed_text = ""
+        for i in range(len(response_text)):
+            displayed_text += response_text[i]
+            response_placeholder.info(displayed_text + "▌")
+            time.sleep(0.01)  # Adjust the speed of typing
+            
+        # Final update without the cursor
+        response_placeholder.info(displayed_text)
+        
+        return result
+        
     except Exception as e:
-        st.error(f"Error generating response: {e}")
+        import traceback
+        st.error(f"Error generating response: {str(e)}\n\nTraceback:\n{traceback.format_exc()}")
         return None
 
-# --- Streamlit App UI ---
+# Add cleanup function to manage ChromaDB persistence
+def cleanup_chroma_db():
+    """
+    Clean up the ChromaDB directory when needed
+    """
+    persist_directory = os.path.join(os.getcwd(), "chroma_db")
+    if os.path.exists(persist_directory):
+        import shutil
+        try:
+            shutil.rmtree(persist_directory)
+        except Exception as e:
+            st.warning(f"Error cleaning up ChromaDB: {e}")
 
-st.set_page_config(page_title='🦜🔗 Advanced Ask the Doc App v3 - Gemini')
-st.title('🦜🔗 Advanced Ask the Doc App v3 - Gemini')
+# --- Streamlit App UI ---
+st.set_page_config(page_title='🦜🔗 Advanced Document Query Chatbot')
+st.title('🦜🔗 Advanced Document Query Chatbot')
 
 st.write("## Instructions")
 st.write(
     "Upload a document (txt, pdf, docx, or doc) and ask a question about its content. "
-    "This version uses **Google Gemini Pro** for question answering. "
-    "It includes advanced error handling, feedback on document processing, and displays the source context used to generate the answer."
+    "This version includes advanced error handling, feedback on document processing, and displays the source context "
+    "used to generate the answer."
 )
 
-# File uploader outside form and using session_state
-if "uploaded_file" not in st.session_state:
-    st.session_state.uploaded_file = None
-uploaded_file = st.file_uploader('Upload a document', type=['txt', 'pdf', 'docx', 'doc'], key="file_uploader")
-st.session_state.uploaded_file = uploaded_file # Explicitly set session_state
-
-if st.session_state.uploaded_file: # Use session_state for conditional check
-    st.success("File uploaded successfully.")
+# File upload and query input
+uploaded_file = st.file_uploader('Upload a document', type=['txt', 'pdf', 'docx', 'doc'])
+query_text = st.text_input('Enter your question:', placeholder='Ask something about the document.', disabled=(uploaded_file is None))
 
 result = None
 
-# Form for query text and Google API key
-with st.form("query_form"):
-    query_text = st.text_input('Enter your question:', placeholder='Ask something about the document.')
-    google_api_key = st.text_input(
-        'Google API Key',
+with st.form('query_form', clear_on_submit=True):
+    cohere_api_key = st.text_input(
+        'Cohere API Key',
         type='password',
-        help="Enter your Google API key (Get it from Google AI Studio)."
+        help="Enter your Cohere API key (must start with x-).",
+        disabled=False
     )
-
-    # Debugging outputs inside the form
-    st.write(f"uploaded_file (session_state): {st.session_state.uploaded_file is not None}")
-    st.write(f"query_text: {bool(query_text)}")
-    st.write(f"google_api_key: {bool(google_api_key)}")
-    st.write(f"Combined condition (for button): {(st.session_state.uploaded_file and query_text and google_api_key)}") # Adjusted condition to use session_state
-    st.write(f"disabled: {not google_api_key}") # Simplified disabled condition - ONLY depends on API key for testing
-
-    submitted = st.form_submit_button("Submit Query", disabled=(not google_api_key)) # Simplified disabled condition
-
+    submitted = st.form_submit_button("Submit Query")
     if submitted:
-        # Validate that all required inputs are provided - now checking session_state for uploaded_file
-        if not (st.session_state.uploaded_file and query_text and google_api_key):
-            st.error("Please ensure you have uploaded a document, entered a question, and provided your Google API key.")
-        else:
-            with st.spinner('Processing document and generating answer...'):
-                processed_docs = load_and_preprocess_document(st.session_state.uploaded_file) # Use session_state for processing
-                if processed_docs:
-                    result = generate_response(processed_docs, google_api_key, query_text)
+        with st.spinner('Processing document and generating answer...'):
+            processed_docs = load_and_preprocess_document(uploaded_file)
+            if processed_docs:
+                result = generate_response(processed_docs, cohere_api_key, query_text)
 
 if result:
     st.write("## Answer")
-    answer = result.get("result", "No answer returned")
-    st.info(answer)
-
+    # Answer is already displayed through streaming
+    
+    # Display source context
     source_docs = result.get("source_documents", [])
     if source_docs:
         st.write("### Source Document Chunks Used:")
@@ -154,12 +201,22 @@ with st.expander("Show Evaluation Metrics (Basic)"):
     test_question = st.text_input("Test Question", placeholder="Enter a test question here...")
     expected_answer = st.text_area("Expected Answer", placeholder="Enter the expected answer here...")
     evaluate = st.button("Evaluate Test Query")
-
+    
     if evaluate and test_question and expected_answer and result:
-        if expected_answer.lower() in answer.lower():
+        # For simplicity, we compare if the answer contains expected answer keywords
+        # In a real-world scenario, you would compute more robust metrics
+        if expected_answer.lower() in result["result"].lower():
             st.success("The answer meets the expected criteria.")
         else:
-            st.warning("The answer does not match the expected answer well.")
+            st.warning("The answer does not match the expected answer well. Further tuning may be required.")
 
 st.write("----")
-st.write("**Note:** This is a prototype demonstrating advanced features using **Google Gemini Pro**, including improved error handling, source context display, and basic evaluation integration. Further enhancements (such as image OCR and advanced table parsing) can be added in future iterations.")
+st.write("**Note:** This is a prototype demonstrating advanced features, including improved error handling, source context display, and basic evaluation integration. Further enhancements (such as image OCR and advanced table parsing) can be added in future iterations.")
+
+# Remove the main() function call and use this instead
+if __name__ == "__main__":
+    try:
+        # Your Streamlit app code is already running, no need for a main() function
+        pass
+    finally:
+        cleanup_chroma_db()
