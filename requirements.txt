@@ -1,0 +1,11 @@
+streamlit
+langchain
+langchain-community
+langchain-cohere
+cohere
+unstructured
+unstructured[pdf]
+unstructured[docx]
+openai
+chromadb
+tiktoken
