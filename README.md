@@ -54,7 +54,7 @@ This project directly addresses the requirements outlined in the Ooredoo AI Engi
 
 1.  **Clone the repository:**
     ```bash
-    git clone [repository URL]
+    git clone https://github.com/KatoStevenMubiru/Ooredoo-RAG.git
     cd [repository-directory]
     ```
 
