@@ -36,7 +36,7 @@ This project directly addresses the requirements outlined in the Ooredoo AI Engi
 
 ## Project Structure
 
-*   `advanced_streamlit_app.py`: Main application file for the Streamlit UI and backend logic.
+*   `app.py`: Main application file for the Streamlit UI and backend logic.
 *   `requirements.txt`: List of Python dependencies.
 *   `chroma_db/`: Directory for ChromaDB persistence.
 
@@ -80,7 +80,7 @@ This project directly addresses the requirements outlined in the Ooredoo AI Engi
 
 5.  **Run the Application:**
     ```bash
-    streamlit run advanced_streamlit_app.py
+    streamlit run app.py
     ```
 
 ## Evaluation
