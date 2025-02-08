@@ -9,3 +9,10 @@ unstructured[docx]
 openai
 chromadb
 tiktoken
+unstructured[all]
+tabulate
+pandas
+transformers
+torch
+sentence-transformers
+nltk
