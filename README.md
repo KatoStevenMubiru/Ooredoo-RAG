@@ -110,7 +110,7 @@ This project directly addresses and exceeds the requirements outlined in the Oor
 
 6.  **Run the Application:**
     ```bash
-    streamlit run advanced_streamlit_app.py
+    streamlit run app.py
     ```
 
 ## Evaluation
