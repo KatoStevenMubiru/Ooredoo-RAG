@@ -9,20 +9,25 @@ The code is extensively commented for clarity.
 
 # --- Streamlit Configuration ---
 import streamlit as st
+
 # Set page configuration as the very first Streamlit command.
 st.set_page_config(page_title="🦜🔗 Advanced Document Query Chatbot")
 
 # --- Standard Library Imports ---
-import tempfile   # For temporary file handling.
-import os         # For file path operations.
-import time       # For delays and performance measurement.
+import tempfile  # For temporary file handling.
+import os  # For file path operations.
+import time  # For delays and performance measurement.
 import traceback  # For error traceback.
-import shutil     # For file/directory operations.
+import shutil  # For file/directory operations.
+import re  # For regular expression-based text cleaning.
+import string  # For punctuation definitions.
 
 # --- Imports for Document Processing and Retrieval ---
 from chromadb.config import Settings
 from langchain_community.vectorstores import Chroma
-from langchain.document_loaders import UnstructuredFileLoader  # (Deprecated, but kept for compatibility)
+from langchain.document_loaders import (
+    UnstructuredFileLoader,
+)  # (Deprecated, but kept for compatibility)
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.retrievers import BM25Retriever, EnsembleRetriever
 from langchain_community.retrievers import *  # Additional retriever functions.
@@ -39,15 +44,40 @@ from nltk.corpus import wordnet
 # --- Imports for Graph-Based Retrieval and Entity Extraction ---
 import spacy
 import networkx as nx
-nlp = spacy.load("en_core_web_sm")
+
+nlp = spacy.load(
+    "en_core_web_sm"
+)  # Load spaCy's small English model for entity extraction.
 
 # --- Imports for Advanced Document Content Handling ---
 import cv2
 import easyocr
+
 try:
     from camelot.io import read_pdf
 except ImportError:
     st.error("Camelot not installed. Please install with: pip install 'camelot-py[cv]'")
+
+
+# --- Helper Function: Text Cleaning ---
+def clean_text(text):
+    """
+    Clean the input text by lowercasing, removing punctuation, and normalizing whitespace.
+
+    Parameters:
+        text (str): The text to clean.
+
+    Returns:
+        str: The cleaned text.
+    """
+    # Lowercase the text
+    text = text.lower()
+    # Remove punctuation using regex
+    text = re.sub(r"[" + re.escape(string.punctuation) + "]", "", text)
+    # Normalize whitespace (remove extra spaces, newlines, tabs)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
 
 # --- Advanced Document Content Handler Class ---
 class AdvancedContentHandler:
@@ -55,28 +85,34 @@ class AdvancedContentHandler:
     Processes documents to extract advanced content such as tables and image text.
     Uses Camelot for table extraction from PDFs and EasyOCR for OCR on images.
     """
+
     def __init__(self):
         self.table_data = []
         self.image_data = []
         try:
-            # Attempt to initialize EasyOCR; if fails, disable OCR functionality.
-            self.reader = easyocr.Reader(['en'], gpu=False)
+            # Attempt to initialize EasyOCR; if it fails, disable OCR functionality.
+            self.reader = easyocr.Reader(["en"], gpu=False)
         except Exception as e:
-            st.error(f"Error initializing EasyOCR: {e}. Image text extraction will be disabled.")
+            st.error(
+                f"Error initializing EasyOCR: {e}. Image text extraction will be disabled."
+            )
             self.reader = None
 
     def process_document(self, file_path):
         """
         Process the document to extract tables (if PDF) and image text.
+
+        Parameters:
+            file_path (str): Path to the document file.
         """
         # Process tables if the document is a PDF.
-        if file_path.endswith('.pdf'):
+        if file_path.endswith(".pdf"):
             try:
-                tables = read_pdf(file_path, flavor='lattice')
+                tables = read_pdf(file_path, flavor="lattice")
                 self.table_data = [table.df for table in tables]
             except Exception as e:
                 st.warning(f"Error extracting tables: {e}")
-        
+
         # Process image text using EasyOCR.
         img = cv2.imread(file_path)
         if img is not None and self.reader is not None:
@@ -85,6 +121,9 @@ class AdvancedContentHandler:
     def extract_image_text(self, image):
         """
         Extract text from the image using EasyOCR.
+
+        Parameters:
+            image (numpy array): The image to process.
         """
         try:
             result = self.reader.readtext(image, detail=0)
@@ -93,54 +132,69 @@ class AdvancedContentHandler:
         except Exception as e:
             st.warning(f"Error extracting text from image: {e}")
 
+
 # --- Comprehensive Evaluation Framework ---
 from sklearn.metrics import precision_recall_fscore_support
 from sentence_transformers import SentenceTransformer
 import numpy as np
+
 
 class RAGEvaluator:
     """
     Evaluates the performance of the RAG system.
     Metrics include retrieval precision/recall, semantic similarity, and response time.
     """
+
     def __init__(self):
         self.metrics_history = []
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Initialize a SentenceTransformer model to compute embeddings for semantic similarity.
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
     def evaluate_iteration(self, test_cases, responses):
+        """
+        Evaluate a single iteration of the system's performance.
+
+        Parameters:
+            test_cases (list): A list of test cases with expected relevant documents and answers.
+            responses (list): A list of responses produced by the system.
+
+        Returns:
+            str: A formatted evaluation report.
+        """
         metrics = {
-            'retrieval_metrics': self.evaluate_retrieval(test_cases, responses),
-            'answer_quality': self.evaluate_answer_quality(test_cases, responses),
-            'response_time': self.measure_performance(test_cases)
+            "retrieval_metrics": self.evaluate_retrieval(test_cases, responses),
+            "answer_quality": self.evaluate_answer_quality(test_cases, responses),
+            "response_time": self.measure_performance(test_cases),
         }
-        self.metrics_history.append({'timestamp': time.time(), 'metrics': metrics})
+        self.metrics_history.append({"timestamp": time.time(), "metrics": metrics})
         return self.generate_evaluation_report(metrics)
 
     def evaluate_retrieval(self, test_cases, responses):
         precision_scores = []
         recall_scores = []
         for test_case, response in zip(test_cases, responses):
-            relevant_docs = set(test_case['relevant_documents'])
-            retrieved_docs = set(response['source_documents'])
+            relevant_docs = set(test_case["relevant_documents"])
+            retrieved_docs = set(response["source_documents"])
             precision = len(relevant_docs & retrieved_docs) / (len(retrieved_docs) or 1)
             recall = len(relevant_docs & retrieved_docs) / (len(relevant_docs) or 1)
             precision_scores.append(precision)
             recall_scores.append(recall)
         return {
-            'average_precision': np.mean(precision_scores),
-            'average_recall': np.mean(recall_scores)
+            "average_precision": np.mean(precision_scores),
+            "average_recall": np.mean(recall_scores),
         }
 
     def evaluate_answer_quality(self, test_cases, responses):
         similarities = []
         for test_case, response in zip(test_cases, responses):
-            expected_embedding = self.model.encode(test_case['expected_answer'])
-            actual_embedding = self.model.encode(response['answer'])
+            expected_embedding = self.model.encode(test_case["expected_answer"])
+            actual_embedding = self.model.encode(response["answer"])
             similarity = np.dot(expected_embedding, actual_embedding) / (
-                np.linalg.norm(expected_embedding) * np.linalg.norm(actual_embedding) or 1
+                np.linalg.norm(expected_embedding) * np.linalg.norm(actual_embedding)
+                or 1
             )
             similarities.append(similarity)
-        return {'semantic_similarity': np.mean(similarities)}
+        return {"semantic_similarity": np.mean(similarities)}
 
     def measure_performance(self, test_cases):
         # Placeholder for performance measurement.
@@ -155,12 +209,14 @@ class RAGEvaluator:
         )
         return report
 
+
 # --- Multi-Step Reasoning and Query Decomposition ---
 class ComplexQueryHandler:
     """
     Decomposes a complex query into sub-queries using the LLM, builds a reasoning chain as a DAG,
     and synthesizes a final answer from intermediate results.
     """
+
     def __init__(self, llm):
         self.llm = llm
         self.reasoning_steps = []
@@ -191,11 +247,13 @@ class ComplexQueryHandler:
     def execute_reasoning_chain(self, chain: nx.DiGraph) -> dict:
         results = {}
         for node in nx.topological_sort(chain):
-            query = chain.nodes[node]['query']
+            query = chain.nodes[node]["query"]
             context = self.get_context_from_previous(node, chain, results)
             result = self.execute_single_query(query, context)
             results[node] = result
-            self.reasoning_steps.append({'step': node, 'query': query, 'result': result})
+            self.reasoning_steps.append(
+                {"step": node, "query": query, "result": result}
+            )
         return results
 
     def get_context_from_previous(self, node, chain, results):
@@ -213,7 +271,8 @@ class ComplexQueryHandler:
         return {"final_answer": "", "steps": []}
 
 
-# --- Existing Functions (expand_query, refine_query, load_and_preprocess_document, graph_based_retrieval, create_hybrid_retriever, rerank_documents) ---
+# --- Existing Functions: expand_query, refine_query, load_and_preprocess_document, graph_based_retrieval, create_hybrid_retriever, rerank_documents ---
+
 
 def expand_query(query):
     try:
@@ -234,6 +293,7 @@ def expand_query(query):
                     expanded_words.add(synonym)
     return " ".join(expanded_words)
 
+
 def refine_query(query, cohere_api_key):
     prompt = (
         f'Below is a user\'s query: "{query}"\n\n'
@@ -251,25 +311,75 @@ def refine_query(query, cohere_api_key):
         refined_query = query
     return refined_query
 
+
 def load_and_preprocess_document(uploaded_file):
+    """
+    Load an uploaded document, clean its text, and preprocess it for retrieval tasks.
+
+    The function:
+      - Saves the uploaded file temporarily.
+      - Loads the document contents using UnstructuredFileLoader.
+      - Cleans up the temporary file.
+      - Combines the document text and applies cleaning steps (lowercasing, punctuation removal, whitespace normalization).
+      - Splits the cleaned text into chunks using RecursiveCharacterTextSplitter.
+
+    Returns:
+        A list of processed document chunks.
+    """
     try:
         if uploaded_file is not None:
             suffix = os.path.splitext(uploaded_file.name)[1]
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_file_path = tmp_file.name
+
+            # Load the document using UnstructuredFileLoader.
             loader = UnstructuredFileLoader(tmp_file_path)
             documents = loader.load()
+
+            # Remove the temporary file.
             os.remove(tmp_file_path)
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            processed_docs = text_splitter.split_documents(documents)
-            st.success(f"Document processed successfully. {len(processed_docs)} text chunks created.")
+
+            # Combine all document chunks into one text.
+            combined_text = " ".join(doc.page_content for doc in documents)
+            # Clean the combined text.
+            cleaned_text = clean_text(combined_text)
+
+            # Create a new Document object with the cleaned text.
+            # (Assuming a Document class is available from langchain; adjust if needed.)
+            from langchain.docstore.document import Document
+
+            cleaned_document = Document(page_content=cleaned_text)
+            # Use the cleaned document for splitting.
+            cleaned_documents = [cleaned_document]
+
+            # Split the cleaned document into chunks.
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000, chunk_overlap=200
+            )
+            processed_docs = text_splitter.split_documents(cleaned_documents)
+
+            st.success(
+                f"Document processed successfully. {len(processed_docs)} text chunks created."
+            )
             return processed_docs
     except Exception as e:
         st.error(f"Error processing the document: {e}")
         return None
 
+
 def graph_based_retrieval(processed_docs, query):
+    """
+    Perform graph-based retrieval on document chunks using shared named entities.
+
+    Steps:
+      - Extract named entities from each chunk using spaCy.
+      - Build a graph where each node represents a chunk and edges indicate shared entities.
+      - Use Personalized PageRank to rank chunks based on overlap with query entities.
+
+    Returns:
+        A list of document chunks ranked by relevance.
+    """
     chunk_entities = {}
     for idx, doc in enumerate(processed_docs):
         spacy_doc = nlp(doc.page_content)
@@ -294,7 +404,19 @@ def graph_based_retrieval(processed_docs, query):
     ranked_docs = [processed_docs[i] for i in ranked_indices]
     return ranked_docs
 
+
 def create_hybrid_retriever(processed_docs, cohere_api_key):
+    """
+    Create a hybrid retriever combining vector-based and BM25 retrieval.
+
+    Steps:
+      - Set up a Chroma vector store using CohereEmbeddings for semantic search.
+      - Initialize a BM25 retriever for keyword-based search.
+      - Combine both methods in an EnsembleRetriever.
+
+    Returns:
+        An EnsembleRetriever object.
+    """
     try:
         persist_directory = os.path.join(os.getcwd(), "chroma_db")
         os.makedirs(persist_directory, exist_ok=True)
@@ -318,10 +440,19 @@ def create_hybrid_retriever(processed_docs, cohere_api_key):
         )
         return ensemble_retriever
     except Exception as e:
-        st.error(f"Error creating hybrid retriever: {str(e)}\n\nTraceback:\n{traceback.format_exc()}")
+        st.error(
+            f"Error creating hybrid retriever: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        )
         return None
 
+
 def rerank_documents(query, documents, cross_encoder):
+    """
+    Re-rank candidate document chunks based on their relevance to the query using a CrossEncoder.
+
+    Returns:
+        A sorted list of documents with the most relevant first.
+    """
     try:
         pairs = [(query, doc.page_content) for doc in documents]
         scores = cross_encoder.predict(pairs)
@@ -332,37 +463,80 @@ def rerank_documents(query, documents, cross_encoder):
         st.error(f"Error in re-ranking documents: {e}")
         return documents
 
+
 def generate_response(processed_docs, cohere_api_key, query_text):
+    """
+    Generate the final answer using advanced RAG techniques.
+
+    Steps:
+      1. Refine the query using chain-of-thought reasoning.
+      2. Expand the refined query with synonyms.
+      3. Retrieve document chunks via graph-based retrieval.
+      4. Use hybrid retrieval to obtain candidate chunks.
+      5. Combine and deduplicate these candidates.
+      6. Re-rank them using a CrossEncoder.
+      7. Generate the final answer by feeding the top chunks into an LLM.
+
+    Returns:
+        A dictionary with the final answer and the top-ranked source documents.
+    """
     try:
         # Step 1: Chain-of-Thought Query Refinement
         refined_query = refine_query(query_text, cohere_api_key)
         st.info(f"Refined Query: {refined_query}")
+
         # Step 2: Query Expansion
         expanded_query = expand_query(refined_query)
         st.info(f"Expanded Query: {expanded_query}")
+
         # Step 3: Graph-Based Retrieval
         graph_ranked_docs = graph_based_retrieval(processed_docs, expanded_query)
+
         # Step 4: Hybrid Retrieval
         hybrid_retriever = create_hybrid_retriever(processed_docs, cohere_api_key)
         if hybrid_retriever is None:
             return None
         candidate_docs = hybrid_retriever.get_relevant_documents(expanded_query)
+
         # Step 5: Combine and Deduplicate Candidate Documents
-        combined_docs = list({doc.page_content: doc for doc in (graph_ranked_docs + candidate_docs)}.values())
+        combined_docs = list(
+            {
+                doc.page_content: doc for doc in (graph_ranked_docs + candidate_docs)
+            }.values()
+        )
+
         # Step 6: Re-Ranking using CrossEncoder
         cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
         ranked_docs = rerank_documents(expanded_query, combined_docs, cross_encoder)
         top_docs = ranked_docs[:5]
-        # Step 7: Answer Generation (Placeholder)
+
+        # Step 7: Final Answer Generation
+        # Combine the content of the top-ranked document chunks into context.
+        docs_text = "\n\n".join([doc.page_content for doc in top_docs])
+        final_prompt = (
+            f"Based on the following context extracted from the document:\n\n{docs_text}\n\n"
+            f"Answer the following question: {query_text}"
+        )
+        final_llm = Cohere(
+            cohere_api_key=cohere_api_key, temperature=0.7, max_tokens=512
+        )
+        final_answer = final_llm(final_prompt)  # Generate the final answer.
+
         return {
-            "result": "Answer generation logic goes here",
+            "result": final_answer,
             "source_documents": top_docs,
         }
     except Exception as e:
-        st.error(f"Error generating response: {e}\n\nTraceback:\n{traceback.format_exc()}")
+        st.error(
+            f"Error generating response: {e}\n\nTraceback:\n{traceback.format_exc()}"
+        )
         return None
 
+
 def cleanup_chroma_db():
+    """
+    Clean up the ChromaDB directory by removing the persisted vector store.
+    """
     try:
         chroma_db_dir = os.path.join(os.getcwd(), "chroma_db")
         if os.path.exists(chroma_db_dir):
@@ -370,6 +544,7 @@ def cleanup_chroma_db():
             st.success("ChromaDB directory cleaned up successfully.")
     except Exception as e:
         st.error(f"Error cleaning up ChromaDB directory: {e}")
+
 
 # --- Streamlit App UI ---
 st.title("🦜🔗 Advanced Document Query Chatbot")
@@ -381,16 +556,29 @@ st.write(
     "multi-step reasoning, and a comprehensive evaluation framework."
 )
 
-uploaded_file = st.file_uploader("Upload a document", type=["txt", "pdf", "docx", "doc"])
-query_text = st.text_input("Enter your question:", placeholder="Ask something about the document.", disabled=(uploaded_file is None))
+uploaded_file = st.file_uploader(
+    "Upload a document", type=["txt", "pdf", "docx", "doc"]
+)
+query_text = st.text_input(
+    "Enter your question:",
+    placeholder="Ask something about the document.",
+    disabled=(uploaded_file is None),
+)
 
 result = None
 
 with st.form("query_form", clear_on_submit=True):
-    cohere_api_key = st.text_input("Cohere API Key", type="password", help="Enter your Cohere API key (must start with x-).", disabled=False)
+    cohere_api_key = st.text_input(
+        "Cohere API Key",
+        type="password",
+        help="Enter your Cohere API key (must start with x-).",
+        disabled=False,
+    )
     submitted = st.form_submit_button("Submit Query")
     if submitted:
-        with st.spinner("Processing document, refining query, retrieving documents, and generating answer..."):
+        with st.spinner(
+            "Processing document, refining query, retrieving documents, and generating answer..."
+        ):
             processed_docs = load_and_preprocess_document(uploaded_file)
             if processed_docs:
                 result = generate_response(processed_docs, cohere_api_key, query_text)
@@ -415,7 +603,7 @@ if uploaded_file:
     os.remove(tmp_file_path)
     advanced_content = {
         "tables": advanced_handler.table_data,
-        "images": advanced_handler.image_data
+        "images": advanced_handler.image_data,
     }
     if advanced_content["tables"] or advanced_content["images"]:
         st.info("Advanced content extracted from document (tables/images).")
@@ -426,7 +614,11 @@ if uploaded_file:
 if query_text and cohere_api_key:
     if st.button("Run Complex Query Decomposition"):
         # Use a lambda to wrap the Cohere call for the ComplexQueryHandler.
-        complex_handler = ComplexQueryHandler(lambda prompt: Cohere(cohere_api_key=cohere_api_key, temperature=0.7, max_tokens=150)(prompt))
+        complex_handler = ComplexQueryHandler(
+            lambda prompt: Cohere(
+                cohere_api_key=cohere_api_key, temperature=0.7, max_tokens=150
+            )(prompt)
+        )
         complex_result = complex_handler.process_complex_query(query_text)
         st.write("## Complex Query Handling Result")
         st.json(complex_result)
@@ -437,14 +629,21 @@ if st.button("Run Evaluation (Demo)"):
     # Dummy test cases and responses for demonstration purposes.
     test_cases = [
         {
-            "relevant_documents": ["Example chunk content 1", "Example chunk content 2"],
-            "expected_answer": "The Webflow CMS plan costs 276 for 12 months."
+            "relevant_documents": [
+                "Example chunk content 1",
+                "Example chunk content 2",
+            ],
+            "expected_answer": "The Webflow CMS plan costs 276 for 12 months.",
         }
     ]
     responses = [
         {
-            "source_documents": [doc.page_content for doc in result.get("source_documents", [])] if result else [],
-            "answer": result["result"] if result else ""
+            "source_documents": (
+                [doc.page_content for doc in result.get("source_documents", [])]
+                if result
+                else []
+            ),
+            "answer": result["result"] if result else "",
         }
     ]
     evaluation_report = evaluator.evaluate_iteration(test_cases, responses)
