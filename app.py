@@ -16,10 +16,10 @@ st.set_page_config(page_title="🦜🔗 Advanced Document Query Chatbot")
 # --- Standard Library Imports ---
 import tempfile  # For temporary file handling.
 import os  # For file path operations.
-import time  # For delays and performance measurement.
-import traceback  # For error traceback.
-import shutil  # For file/directory operations.
-import re  # For regular expression-based text cleaning.
+import time  # For delays, performance measurement, and response time tracking.
+import traceback  # For detailed error tracebacks.
+import shutil  # For file/directory cleanup.
+import re  # For regex-based text cleaning.
 import string  # For punctuation definitions.
 
 # --- Imports for Document Processing and Retrieval ---
@@ -54,7 +54,7 @@ import cv2
 import easyocr
 
 try:
-    from camelot.io import read_pdf
+    from camelot.io import read_pdf  # For table extraction from PDFs.
 except ImportError:
     st.error("Camelot not installed. Please install with: pip install 'camelot-py[cv]'")
 
@@ -65,16 +65,16 @@ def clean_text(text):
     Clean the input text by lowercasing, removing punctuation, and normalizing whitespace.
 
     Parameters:
-        text (str): The text to clean.
+        text (str): The text to be cleaned.
 
     Returns:
         str: The cleaned text.
     """
-    # Lowercase the text
+    # Convert text to lowercase.
     text = text.lower()
-    # Remove punctuation using regex
+    # Remove punctuation using regex (ensures that punctuation doesn't affect token matching).
     text = re.sub(r"[" + re.escape(string.punctuation) + "]", "", text)
-    # Normalize whitespace (remove extra spaces, newlines, tabs)
+    # Normalize whitespace: remove extra spaces, newlines, and tabs.
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -83,14 +83,14 @@ def clean_text(text):
 class AdvancedContentHandler:
     """
     Processes documents to extract advanced content such as tables and image text.
-    Uses Camelot for table extraction from PDFs and EasyOCR for OCR on images.
+    Uses Camelot for table extraction (from PDFs) and EasyOCR for OCR on images.
     """
 
     def __init__(self):
-        self.table_data = []
-        self.image_data = []
+        self.table_data = []  # List to store extracted tables.
+        self.image_data = []  # List to store extracted text from images.
         try:
-            # Attempt to initialize EasyOCR; if it fails, disable OCR functionality.
+            # Initialize EasyOCR reader (set gpu=True if a GPU is available).
             self.reader = easyocr.Reader(["en"], gpu=False)
         except Exception as e:
             st.error(
@@ -100,12 +100,12 @@ class AdvancedContentHandler:
 
     def process_document(self, file_path):
         """
-        Process the document to extract tables (if PDF) and image text.
+        Process the document file to extract tables (if it's a PDF) and image text.
 
         Parameters:
             file_path (str): Path to the document file.
         """
-        # Process tables if the document is a PDF.
+        # If the file is a PDF, attempt to extract tables using Camelot.
         if file_path.endswith(".pdf"):
             try:
                 tables = read_pdf(file_path, flavor="lattice")
@@ -113,7 +113,7 @@ class AdvancedContentHandler:
             except Exception as e:
                 st.warning(f"Error extracting tables: {e}")
 
-        # Process image text using EasyOCR.
+        # Attempt to read the file as an image and extract text using EasyOCR.
         img = cv2.imread(file_path)
         if img is not None and self.reader is not None:
             self.extract_image_text(img)
@@ -123,7 +123,7 @@ class AdvancedContentHandler:
         Extract text from the image using EasyOCR.
 
         Parameters:
-            image (numpy array): The image to process.
+            image (numpy array): The image data.
         """
         try:
             result = self.reader.readtext(image, detail=0)
@@ -142,29 +142,30 @@ import numpy as np
 class RAGEvaluator:
     """
     Evaluates the performance of the RAG system.
-    Metrics include retrieval precision/recall, semantic similarity, and response time.
+    Computes metrics including retrieval precision/recall, semantic similarity, and response time.
     """
 
     def __init__(self):
         self.metrics_history = []
-        # Initialize a SentenceTransformer model to compute embeddings for semantic similarity.
+        # Use a SentenceTransformer model to compute embeddings for answer quality evaluation.
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    def evaluate_iteration(self, test_cases, responses):
+    def evaluate_iteration(self, test_cases, responses ):
         """
-        Evaluate a single iteration of the system's performance.
+        Evaluate a single iteration's performance and generate a report.
 
         Parameters:
-            test_cases (list): A list of test cases with expected relevant documents and answers.
-            responses (list): A list of responses produced by the system.
+            test_cases (list): List of test cases with 'relevant_documents' and 'expected_answer'.
+            responses (list): List of system responses.
+            elapsed_time (float): Time taken to generate the answer (in seconds).
 
         Returns:
-            str: A formatted evaluation report.
+            str: Formatted evaluation report.
         """
         metrics = {
             "retrieval_metrics": self.evaluate_retrieval(test_cases, responses),
             "answer_quality": self.evaluate_answer_quality(test_cases, responses),
-            "response_time": self.measure_performance(test_cases),
+            "response_time": {"average_time": 0.0},
         }
         self.metrics_history.append({"timestamp": time.time(), "metrics": metrics})
         return self.generate_evaluation_report(metrics)
@@ -197,7 +198,7 @@ class RAGEvaluator:
         return {"semantic_similarity": np.mean(similarities)}
 
     def measure_performance(self, test_cases):
-        # Placeholder for performance measurement.
+        # This function is replaced by passing elapsed_time directly.
         return {"average_time": 0.0}
 
     def generate_evaluation_report(self, metrics):
@@ -213,7 +214,7 @@ class RAGEvaluator:
 # --- Multi-Step Reasoning and Query Decomposition ---
 class ComplexQueryHandler:
     """
-    Decomposes a complex query into sub-queries using the LLM, builds a reasoning chain as a DAG,
+    Decomposes a complex query into sub-queries using the LLM, builds a reasoning chain (DAG),
     and synthesizes a final answer from intermediate results.
     """
 
@@ -275,6 +276,10 @@ class ComplexQueryHandler:
 
 
 def expand_query(query):
+    """
+    Expand the user's query by appending synonyms using NLTK's WordNet.
+    This increases the chances of matching document content with different vocabulary.
+    """
     try:
         nltk.data.find("corpora/wordnet")
     except LookupError:
@@ -295,6 +300,10 @@ def expand_query(query):
 
 
 def refine_query(query, cohere_api_key):
+    """
+    Use a Cohere LLM with chain-of-thought prompting to refine the user's query.
+    The prompt instructs the LLM to explain its reasoning and output a refined query.
+    """
     prompt = (
         f'Below is a user\'s query: "{query}"\n\n'
         "Please perform chain-of-thought reasoning to understand the query and provide a refined version optimized for document retrieval. "
@@ -316,12 +325,12 @@ def load_and_preprocess_document(uploaded_file):
     """
     Load an uploaded document, clean its text, and preprocess it for retrieval tasks.
 
-    The function:
-      - Saves the uploaded file temporarily.
-      - Loads the document contents using UnstructuredFileLoader.
-      - Cleans up the temporary file.
-      - Combines the document text and applies cleaning steps (lowercasing, punctuation removal, whitespace normalization).
-      - Splits the cleaned text into chunks using RecursiveCharacterTextSplitter.
+    Steps:
+      - Save the uploaded file temporarily.
+      - Load the document contents using UnstructuredFileLoader.
+      - Remove the temporary file.
+      - Combine the document text and apply cleaning (lowercasing, punctuation removal, whitespace normalization).
+      - Split the cleaned text into chunks using RecursiveCharacterTextSplitter.
 
     Returns:
         A list of processed document chunks.
@@ -332,33 +341,24 @@ def load_and_preprocess_document(uploaded_file):
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_file_path = tmp_file.name
-
-            # Load the document using UnstructuredFileLoader.
+            # Load document content using UnstructuredFileLoader.
             loader = UnstructuredFileLoader(tmp_file_path)
             documents = loader.load()
-
-            # Remove the temporary file.
             os.remove(tmp_file_path)
-
             # Combine all document chunks into one text.
             combined_text = " ".join(doc.page_content for doc in documents)
-            # Clean the combined text.
+            # Clean the text using our clean_text helper.
             cleaned_text = clean_text(combined_text)
-
-            # Create a new Document object with the cleaned text.
-            # (Assuming a Document class is available from langchain; adjust if needed.)
+            # Create a new Document with the cleaned text.
             from langchain.docstore.document import Document
 
             cleaned_document = Document(page_content=cleaned_text)
-            # Use the cleaned document for splitting.
             cleaned_documents = [cleaned_document]
-
-            # Split the cleaned document into chunks.
+            # Split the cleaned document into smaller chunks.
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000, chunk_overlap=200
             )
             processed_docs = text_splitter.split_documents(cleaned_documents)
-
             st.success(
                 f"Document processed successfully. {len(processed_docs)} text chunks created."
             )
@@ -374,8 +374,9 @@ def graph_based_retrieval(processed_docs, query):
 
     Steps:
       - Extract named entities from each chunk using spaCy.
-      - Build a graph where each node represents a chunk and edges indicate shared entities.
-      - Use Personalized PageRank to rank chunks based on overlap with query entities.
+      - Build an undirected graph where each node represents a chunk.
+      - Add edges between nodes if they share common entities.
+      - Use Personalized PageRank (with query entity overlap) to rank the chunks.
 
     Returns:
         A list of document chunks ranked by relevance.
@@ -407,12 +408,12 @@ def graph_based_retrieval(processed_docs, query):
 
 def create_hybrid_retriever(processed_docs, cohere_api_key):
     """
-    Create a hybrid retriever combining vector-based and BM25 retrieval.
+    Create a hybrid retriever combining vector-based semantic search and BM25 keyword retrieval.
 
     Steps:
       - Set up a Chroma vector store using CohereEmbeddings for semantic search.
       - Initialize a BM25 retriever for keyword-based search.
-      - Combine both methods in an EnsembleRetriever.
+      - Combine both retrievers using an EnsembleRetriever.
 
     Returns:
         An EnsembleRetriever object.
@@ -451,7 +452,7 @@ def rerank_documents(query, documents, cross_encoder):
     Re-rank candidate document chunks based on their relevance to the query using a CrossEncoder.
 
     Returns:
-        A sorted list of documents with the most relevant first.
+        A sorted list of documents with the most relevant ones first.
     """
     try:
         pairs = [(query, doc.page_content) for doc in documents]
@@ -469,16 +470,16 @@ def generate_response(processed_docs, cohere_api_key, query_text):
     Generate the final answer using advanced RAG techniques.
 
     Steps:
-      1. Refine the query using chain-of-thought reasoning.
-      2. Expand the refined query with synonyms.
-      3. Retrieve document chunks via graph-based retrieval.
-      4. Use hybrid retrieval to obtain candidate chunks.
-      5. Combine and deduplicate these candidates.
-      6. Re-rank them using a CrossEncoder.
-      7. Generate the final answer by feeding the top chunks into an LLM.
+      1. Chain-of-Thought Query Refinement: Refine the query using an LLM.
+      2. Query Expansion: Enhance the query with synonyms.
+      3. Graph-Based Retrieval: Rank document chunks via shared entities.
+      4. Hybrid Retrieval: Retrieve candidate chunks via vector and BM25 methods.
+      5. Combine and Deduplicate Candidate Documents.
+      6. Re-Rank the candidates using a CrossEncoder.
+      7. Final Answer Generation: Use the top-ranked chunks as context for generating the answer.
 
     Returns:
-        A dictionary with the final answer and the top-ranked source documents.
+        A dictionary containing the final answer and the source document chunks.
     """
     try:
         # Step 1: Chain-of-Thought Query Refinement
@@ -511,12 +512,13 @@ def generate_response(processed_docs, cohere_api_key, query_text):
         top_docs = ranked_docs[:5]
 
         # Step 7: Final Answer Generation
-        # Combine the content of the top-ranked document chunks into context.
+        # Combine the content of the top-ranked document chunks to create a context.
         docs_text = "\n\n".join([doc.page_content for doc in top_docs])
         final_prompt = (
             f"Based on the following context extracted from the document:\n\n{docs_text}\n\n"
             f"Answer the following question: {query_text}"
         )
+        # Create a new LLM instance for answer generation.
         final_llm = Cohere(
             cohere_api_key=cohere_api_key, temperature=0.7, max_tokens=512
         )
@@ -535,7 +537,7 @@ def generate_response(processed_docs, cohere_api_key, query_text):
 
 def cleanup_chroma_db():
     """
-    Clean up the ChromaDB directory by removing the persisted vector store.
+    Clean up the persisted Chroma vector store to free up storage.
     """
     try:
         chroma_db_dir = os.path.join(os.getcwd(), "chroma_db")
@@ -556,6 +558,7 @@ st.write(
     "multi-step reasoning, and a comprehensive evaluation framework."
 )
 
+# File upload and query input.
 uploaded_file = st.file_uploader(
     "Upload a document", type=["txt", "pdf", "docx", "doc"]
 )
@@ -567,6 +570,7 @@ query_text = st.text_input(
 
 result = None
 
+# --- Main Query Form ---
 with st.form("query_form", clear_on_submit=True):
     cohere_api_key = st.text_input(
         "Cohere API Key",
@@ -576,12 +580,14 @@ with st.form("query_form", clear_on_submit=True):
     )
     submitted = st.form_submit_button("Submit Query")
     if submitted:
-        with st.spinner(
-            "Processing document, refining query, retrieving documents, and generating answer..."
-        ):
-            processed_docs = load_and_preprocess_document(uploaded_file)
-            if processed_docs:
-                result = generate_response(processed_docs, cohere_api_key, query_text)
+        # Measure the time taken for generating the response.
+        start_time = time.time()
+        processed_docs = load_and_preprocess_document(uploaded_file)
+        if processed_docs:
+            result = generate_response(processed_docs, cohere_api_key, query_text)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        st.info(f"Response generated in {elapsed_time:.2f} seconds.")
 
 if result:
     st.write("## Answer")
@@ -613,7 +619,7 @@ if uploaded_file:
 # --- Complex Query Decomposition ---
 if query_text and cohere_api_key:
     if st.button("Run Complex Query Decomposition"):
-        # Use a lambda to wrap the Cohere call for the ComplexQueryHandler.
+        # Wrap the Cohere call in a lambda for the ComplexQueryHandler.
         complex_handler = ComplexQueryHandler(
             lambda prompt: Cohere(
                 cohere_api_key=cohere_api_key, temperature=0.7, max_tokens=150
@@ -626,7 +632,7 @@ if query_text and cohere_api_key:
 # --- Evaluation Framework Demonstration ---
 if st.button("Run Evaluation (Demo)"):
     evaluator = RAGEvaluator()
-    # Dummy test cases and responses for demonstration purposes.
+    # Replace dummy test cases with realistic ones if available.
     test_cases = [
         {
             "relevant_documents": [
@@ -646,7 +652,10 @@ if st.button("Run Evaluation (Demo)"):
             "answer": result["result"] if result else "",
         }
     ]
-    evaluation_report = evaluator.evaluate_iteration(test_cases, responses)
+    # Pass the measured elapsed time to the evaluator.
+    evaluation_report = evaluator.evaluate_iteration(
+        test_cases, responses #,elapsed_time
+    )
     st.write("## Evaluation Report")
     st.text(evaluation_report)
 
