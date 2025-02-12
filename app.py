@@ -84,6 +84,7 @@ class AdvancedContentHandler:
     """
     Processes documents to extract advanced content such as tables and image text.
     Uses Camelot for table extraction (from PDFs) and EasyOCR for OCR on images.
+    Most advanved libraries like Pytesseract were abit heavy on my storage and memory.
     """
 
     def __init__(self):
